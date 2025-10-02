@@ -1,6 +1,7 @@
+use rocket::serde::json::Json;
 use serde_json::Value;
 
-use crate::{ApplicationError, csv_record, index::Index, name::Name};
+use crate::{ApplicationError, ErrorResponse, csv_record, index::Index, name::Name};
 
 #[derive(Debug, Clone)]
 pub struct PokeApi;
@@ -11,50 +12,48 @@ impl PokeApi {
         language_url: &str,
         name: &Name,
     ) -> Result<usize, ApplicationError> {
-        match name {
-            Name::En(name) => {
-                let name = name.replace(" ", "-");
-                let url = format!("{}{}/", base_url, name);
-                let resp = reqwest::get(url).await?.text().await?;
-                let value: Value = serde_json::from_str(&resp)?;
-                let id = value["id"].to_string().parse::<usize>()?;
-                Ok(id)
-            }
-            Name::De(name) => {
-                let resp = reqwest::get(language_url).await?.text().await?;
+        let name = name.0.replace(" ", "-");
+        let url = format!("{}{}/", base_url, name);
+        let resp = reqwest::get(url).await?.text().await?;
+        if resp.to_lowercase() == "not found" {
+            // try german name
+            let resp = reqwest::get(language_url).await?.text().await?;
 
-                // get csv data
-                let mut pkm_species_id = None;
-                let mut rdr = csv::Reader::from_reader(resp.as_bytes());
-                for result in rdr.deserialize() {
-                    let record: csv_record::Record = result?;
-                    if name.to_lowercase() == record.name.to_lowercase() {
-                        pkm_species_id = Some(record.pokemon_species_id);
-                    }
-                }
-                match pkm_species_id {
-                    Some(id) => {
-                        let mut rdr = csv::Reader::from_reader(resp.as_bytes());
-                        for result in rdr.deserialize() {
-                            let record: csv_record::Record = result?;
-                            if id == record.pokemon_species_id && record.local_language_id == 9 {
-                                let eng_name = record.name.replace(" ", "-");
-                                let url = format!("{}{}/", base_url, eng_name);
-                                let resp = reqwest::get(url).await?.text().await?;
-                                let value: Value = serde_json::from_str(&resp)?;
-                                let id = value["id"].to_string().parse::<usize>()?;
-                                return Ok(id);
-                            }
-                        }
-                        Err(ApplicationError::NotFound(
-                            "Pokemon not found while fetching english and german name".into(),
-                        ))
-                    }
-                    None => Err(ApplicationError::NotFound(
-                        "csv entry for german name not found".into(),
-                    )),
+            // get csv data
+            let mut pkm_species_id = None;
+            let mut rdr = csv::Reader::from_reader(resp.as_bytes());
+            for result in rdr.deserialize() {
+                let record: csv_record::Record = result?;
+                if name.to_lowercase() == record.name.to_lowercase() {
+                    pkm_species_id = Some(record.pokemon_species_id);
                 }
             }
+            match pkm_species_id {
+                Some(id) => {
+                    let mut rdr = csv::Reader::from_reader(resp.as_bytes());
+                    for result in rdr.deserialize() {
+                        let record: csv_record::Record = result?;
+                        if id == record.pokemon_species_id && record.local_language_id == 9 {
+                            let eng_name = record.name.replace(" ", "-");
+                            let url = format!("{}{}/", base_url, eng_name);
+                            let resp = reqwest::get(url).await?.text().await?;
+                            let value: Value = serde_json::from_str(&resp)?;
+                            let id = value["id"].to_string().parse::<usize>()?;
+                            return Ok(id);
+                        }
+                    }
+                    Err(ApplicationError::NotFound(Json(ErrorResponse::from(
+                        "Pokemon not found while fetching english or german name",
+                    ))))
+                }
+                None => Err(ApplicationError::NotFound(Json(ErrorResponse::from(
+                    "csv entry for german name not found",
+                )))),
+            }
+        } else {
+            let value: Value = serde_json::from_str(&resp)?;
+            let id = value["id"].to_string().parse::<usize>()?;
+            Ok(id)
         }
     }
 
@@ -67,13 +66,13 @@ impl PokeApi {
         let url = format!("{}{}/", base_url, index.0);
         let api_resp = reqwest::get(url).await?.text().await?;
         if api_resp.to_lowercase() == "not found" {
-            return Err(ApplicationError::NotFound(
-                "Pokemon not found while fetching english name".into(),
-            ));
+            return Err(ApplicationError::NotFound(Json(ErrorResponse::from(
+                "Pokemon not found while fetching english name",
+            ))));
         } else {
             let value: Value = serde_json::from_str(&api_resp)?;
             let eng_name = value["name"].to_string().replace("\"", "");
-            names.push(eng_name);
+            names.push(eng_name.to_lowercase());
         };
 
         // get german name
@@ -96,18 +95,20 @@ impl PokeApi {
                     let record: csv_record::Record = result?;
                     if id == record.pokemon_species_id && record.local_language_id == 6 {
                         let ger_name = record.name;
-                        names.push(ger_name);
+                        names.push(ger_name.to_lowercase());
                         found = true;
                     }
                 }
                 if !found {
-                    return Err(ApplicationError::NotFound("Both names not found".into()));
+                    return Err(ApplicationError::NotFound(Json(ErrorResponse::from(
+                        "Pokemon not found while fetching english and german name",
+                    ))));
                 }
             }
             None => {
-                return Err(ApplicationError::NotFound(
-                    "csv entry for german name not found".into(),
-                ));
+                return Err(ApplicationError::NotFound(Json(ErrorResponse::from(
+                    "csv entry for german name not found",
+                ))));
             }
         }
         Ok(names)
