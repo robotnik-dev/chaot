@@ -1,6 +1,5 @@
 use crate::{
-    ApplicationError, BASE_URL, LANGUAGE_URL, book::Book, entry::Entry, index::Index, name::Name,
-    page::Page, pokeapi::PokeApi, side::Side,
+    book::Book, entry::Entry, error::Result, index::Index, name::Name, page::Page, pokeapi::PokeApi, side::Side, BASE_URL, LANGUAGE_URL
 };
 pub use rocket::serde::{Deserialize, Serialize};
 
@@ -17,7 +16,7 @@ pub struct Card {
 }
 
 impl Card {
-    pub async fn try_from_index(index: Index) -> Result<Self, ApplicationError> {
+    pub async fn try_from_index(index: Index) -> Result<Self> {
         let names = PokeApi::get_names(&index, BASE_URL, LANGUAGE_URL).await?;
         let name_en = names[0].clone();
         let name_de = names[1].clone();
@@ -36,9 +35,9 @@ impl Card {
         })
     }
 
-    pub async fn try_from_name(name: Name) -> Result<Self, ApplicationError> {
+    pub async fn try_from_name(name: Name) -> Result<Self> {
         let id = PokeApi::get_id(BASE_URL, LANGUAGE_URL, &name).await?;
-        let index = Index::try_from(id)?;
+        let index = Index::try_new(id)?;
         Card::try_from_index(index).await
     }
 }

@@ -1,23 +1,28 @@
-use rocket::serde::json::Json;
+use std::fmt::Display;
+
+use anyhow::anyhow;
 
 use crate::{
-    ApplicationError, ErrorResponse,
     card::{Deserialize, Serialize},
+    error::Result,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(crate = "rocket::serde")]
 pub struct Index(pub usize);
 
-impl TryFrom<usize> for Index {
-    type Error = ApplicationError;
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
-        if value == 0 {
-            Err(ApplicationError::InputError(Json(ErrorResponse::from(
-                "Index should not be lower than 1",
-            ))))
+impl Index {
+    pub fn try_new(index: usize) -> Result<Self> {
+        if index == 0 {
+            Err(anyhow!("Provided Card ID: {index} can't be lower than 1").into())
         } else {
-            Ok(Self(value))
+            Ok(Self(index))
         }
+    }
+}
+
+impl Display for Index {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0.to_string().as_str())
     }
 }
